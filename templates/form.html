@@ -9,42 +9,35 @@
 
 <body>
     <div class="container">
-        <div class="row">
-            <div class="col">
+        <div class="row justify-content-center">
+            <div class="col-4">
+                <div id="success_alert" class="alert alert-success" role="alert">
+                    Data Added
+                  </div>
+                  <div id="error_alert" class="alert alert-danger" role="alert">
+                    Duplicate User
+                  </div>
                 <h2>User Data Forms</h2>
                 <form method="post" id="userForm" enctype="multipart/form-data">
                     <label for="fname">Full Name:</label><br>
-                    <input type="text" id="fname" name="fname" value=""><br>
+                    <input type="text" id="fname" name="fname" value="" required><br>
                     <label for="lname">Email:</label><br>
-                    <input type="text" id="email" name="email" value=""><br>
+                    <input type="text" id="email" name="email" value="" required><br>
                     <label for="lname">Phone:</label><br>
-                    <input type="text" id="phone" name="phone" value=""><br><br>
+                    <input type="text" id="phone" name="phone" value="" required><br><br>
                     <div class="input-group mb-3">
-                        <input type="file" class="form-control" id="file">
+                        <input type="file" class="form-control" id="file" required>
                     </div>
                     <input type="submit" value="Submit">
                 </form>
             </div>
-            <div class="col">
-                <ul class="list-group">
-                    <li class="list-group-item active" aria-current="true">User's List</li>
-                    <li class="list-group-item">
-                        <div class="card" style="width: 18rem;">
-                            <img src="..." class="card-img-top" alt="...">
-                            <div class="card-body">
-                                <h5 class="card-title">Card title</h5>
-
-                                <a href="#" class="btn btn-primary">Go somewhere</a>
-                            </div>
-                        </div>
-                    </li>
-                </ul>
-
-            </div>
             <script>
-
                 const form = document.getElementById('userForm');
                 const file = document.getElementById('file');
+                const successAlert = document.getElementById('success_alert');
+                const errorAlert = document.getElementById('error_alert');
+                successAlert.style.display = 'none';
+                errorAlert.style.display = 'none';
 
                 form.addEventListener('submit', (event) => {
                     event.preventDefault();
@@ -62,10 +55,26 @@
                     })
                         .then(response => response.json())
                         .then(data => {
-                            // Process the server response here
-                            console.log('Server response:', data);
+                            console.log('data:',data)
+                            if(data.status=='success'){
+                                successAlert.style.display = 'block';
+                                setTimeout(() => {
+                                        successAlert.style.display = 'none';
+                                }, 5000);
+                            }else{
+                                errorAlert.style.display = 'block';
+                                setTimeout(() => {
+                                        errorAlert.style.display = 'none';
+                                }, 5000);
+                            }
+
                         })
                         .catch(error => {
+                            errorAlert.style.display = 'block';
+                            error_msg=error.response
+                            setTimeout(() => {
+                                    errorAlert.style.display = 'none';
+                            }, 5000);
                             console.error('Error fetching server response:', error);
                         });
                 });

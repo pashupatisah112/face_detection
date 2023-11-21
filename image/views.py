@@ -34,7 +34,6 @@ def upload(request):
                 MEDIA_ROOT+'/uploaded', random+image_file.name)
 
             with open(uploading_path, 'wb') as f:
-                # Write the binary data to the file
                 for chunk in image_file.chunks():
                     f.write(chunk)
             savingData = {
@@ -62,7 +61,7 @@ def upload(request):
             return JsonResponse({'status': 'success', 'msg': 'Data Saved', 'data': savingData}, safe=False)
 
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({'status': 'failed', 'msg': 'Unknown error'}, safe=False)
 
 
 def randomGen(length):
@@ -130,5 +129,10 @@ def load_data():
         return data
 
 
-def delete_data(filepath):
-    data = load_data()
+def data_list(request):
+    try:
+        with open(DB_PATH, 'r') as json_file:
+            data = json.load(json_file)
+            return JsonResponse({'status': 'success', 'msg': 'Data Fetched', 'data': data}, safe=False)
+    except Exception as e:
+        return JsonResponse({'status': 'failed', 'msg': 'Unknown error'}, safe=False)
