@@ -1,16 +1,15 @@
+from django.shortcuts import render
 import json
 import os
 import cv2
 import random
 import string
 import dlib
-import dlib
 import numpy as np
 import face_recognition
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import render
-from .settings import MEDIA_ROOT
+from core.settings import MEDIA_ROOT
 
 DB_PATH = os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))+'/db.json'
@@ -19,10 +18,11 @@ DB_UPLOADING = os.path.dirname(os.path.dirname(
 ENCODED_FACE_PATH = os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))+'/encoded_faces.json'
 
-
 def home(request):
     return render(request, 'form.html')
 
+def upload_folder(request):
+    return render(request,'upload_folder.html')
 
 @csrf_exempt
 def upload(request):
