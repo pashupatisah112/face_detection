@@ -5,6 +5,7 @@ import random
 import string
 import dlib
 import dlib
+import numpy as np
 import face_recognition
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -15,6 +16,8 @@ DB_PATH = os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))+'/db.json'
 DB_UPLOADING = os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))+'/db.json'
+ENCODED_FACE_PATH = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))+'/encoded_faces.json'
 
 
 def home(request):
@@ -46,7 +49,7 @@ def upload(request):
             img = cv2.imread(uploading_path)
             faces = detect_face(img)
 
-            existing_face_encoding = folder_image_detect()
+            existing_face_encoding = load_encoding()
             compare = compare_faces(img, faces, existing_face_encoding)
             if (compare):
                 os.remove(uploading_path)
@@ -55,6 +58,16 @@ def upload(request):
                 with open(uploaded_path, 'wb') as f:
                     for chunk in image_file.chunks():
                         f.write(chunk)
+                        
+                for detected_face in faces:
+                    x, y, w, h = detected_face.left(), detected_face.top(), detected_face.width(), detected_face.height()
+
+                    detected_face_image = img[y:y+h, x:x+w]
+
+                    detected_face_image_rgb = cv2.cvtColor(detected_face_image, cv2.COLOR_BGR2RGB)
+
+                    detected_encoding = face_recognition.face_encodings(detected_face_image_rgb)[0]
+                    save_encoding(detected_encoding)
                 save_data(savingData)
 
             os.remove(uploading_path)
@@ -83,9 +96,9 @@ def compare_faces(img, faces, existing_face_encoding):
             detected_face_image, cv2.COLOR_BGR2RGB)
 
         detected_encoding = face_recognition.face_encodings(
-            detected_face_image_rgb)[0]
+            detected_face_image_rgb)[0]        
 
-        threshold = 0.6
+        threshold = 0.5
         match = face_recognition.compare_faces(
             existing_face_encoding, detected_encoding, tolerance=threshold)
 
@@ -136,3 +149,19 @@ def data_list(request):
             return JsonResponse({'status': 'success', 'msg': 'Data Fetched', 'data': data}, safe=False)
     except Exception as e:
         return JsonResponse({'status': 'failed', 'msg': 'Unknown error'}, safe=False)
+
+def save_encoding(encoding):
+    with open(ENCODED_FACE_PATH, 'r') as json_file:
+        data = json.load(json_file)
+        data.append(encoding.tolist())
+        with open(ENCODED_FACE_PATH, 'w') as json_file:
+           json.dump(data, json_file)
+           
+def load_encoding():
+    with open(ENCODED_FACE_PATH, 'r') as json_file:
+        list=[]
+        data = json.load(json_file)
+        for d in data:
+            list.append(np.array(d))
+        return list
+            
