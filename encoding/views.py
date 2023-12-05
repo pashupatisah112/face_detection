@@ -7,6 +7,8 @@ import face_recognition
 from PIL import Image
 from .models import ImageData
 import re
+from core.settings import MEDIA_ROOT
+import numpy as np
 
 
 def get_encodings(request):
@@ -27,6 +29,42 @@ def get_encodings(request):
         return JsonResponse({'status': 'success', 'msg': 'Data fetched', 'data': list}, safe=False)
     except Exception as e:
         return JsonResponse({'success': False, 'msg': 'Error fetching data', 'detail': e}, safe=False)
+
+
+@csrf_exempt
+def check_image(request):
+    try:
+        if request.method == 'POST':
+            image_file = request.FILES['image']
+            uploading_path = os.path.join(
+                MEDIA_ROOT+'/uploading', image_file.name)
+
+            with open(uploading_path, 'wb') as f:
+                for chunk in image_file.chunks():
+                    f.write(chunk)
+
+            face_encoding = getFaceEncoding(uploading_path)
+            if(face_encoding['success']==True):
+                threshold = 0.5
+                efes = []
+                existing_face_encodings = ImageData.objects.values('face_encoding')
+                for efe in existing_face_encodings:
+                    encoding = efe['face_encoding']
+                    efes.append(np.frombuffer(encoding, dtype=np.float64))
+
+                match = face_recognition.compare_faces(
+                    efes, face_encoding['encoding'], tolerance=threshold)
+                if any(match):
+                    os.remove(uploading_path)
+                    return JsonResponse({'status': 'failed', 'msg': 'Duplicate User'})
+                else:
+                    save_images_data(uploading_path, 'New')
+                    os.remove(uploading_path)
+                    return JsonResponse({'status': 'success', 'msg': 'Image data saved'})
+            else:
+                return JsonResponse({'status': 'failed', 'msg': face_encoding['msg']})
+    except Exception as e:
+        return JsonResponse({'status': False, 'detail': e})
 
 
 @csrf_exempt
@@ -73,7 +111,6 @@ def save_images_data(images, root_folder):
         data = []
         for image in images:
             encoding = getFaceEncoding(image)
-            print('enc:',encoding)
             if (encoding['success'] == True):
                 metadata = getImageMetadata(image, root_folder)
                 data.append(
@@ -110,8 +147,10 @@ def getFaceEncoding(image):
             detected_encoding = face_recognition.face_encodings(
                 detected_face_image_rgb)[0]
             return {'success': True, 'encoding': detected_encoding}
+        elif len(faces) > 1:
+            return {'success': False, 'msg': 'More than one face detected.'}
         else:
-            return {'success': False}
+            return {'success': False, 'msg': 'No face detected.'}
     except Exception as e:
         return {'success': False}
 
@@ -133,3 +172,10 @@ def getImageMetadata(image, root_folder):
         return metadata
     except Exception as e:
         return {'success': False}
+
+def truncate_image_data(request):
+    try:
+        ImageData.objects.all().delete()
+        return JsonResponse({'status': 'success', 'msg': 'Table truncated'})
+    except Exception as e:
+        print(e)

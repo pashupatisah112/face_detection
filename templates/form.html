@@ -19,12 +19,12 @@
                   </div>
                 <h2>User Data Forms</h2>
                 <form method="post" id="userForm" enctype="multipart/form-data">
-                    <label for="fname">Full Name:</label><br>
+                    {% comment %} <label for="fname">Full Name:</label><br>
                     <input type="text" id="fname" name="fname" value="" required><br>
                     <label for="lname">Email:</label><br>
                     <input type="text" id="email" name="email" value="" required><br>
                     <label for="lname">Phone:</label><br>
-                    <input type="text" id="phone" name="phone" value="" required><br><br>
+                    <input type="text" id="phone" name="phone" value="" required><br><br> {% endcomment %}
                     <div class="input-group mb-3">
                         <input type="file" class="form-control" id="file" required>
                     </div>
@@ -49,7 +49,7 @@
                     }
                     formData.append('image',image)
 
-                    fetch('/upload', {
+                    fetch('/encoding/check', {
                         method: 'POST',
                         body: formData
                     })
@@ -75,7 +75,7 @@
                             setTimeout(() => {
                                     errorAlert.style.display = 'none';
                             }, 5000);
-                            console.error('Error fetching server response:', error);
+                            console.log('Error fetching server response:', error);
                         });
                 });
             </script>
