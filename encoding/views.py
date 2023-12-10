@@ -1,5 +1,5 @@
 import os
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import cv2
 import dlib
@@ -9,6 +9,8 @@ from .models import ImageData
 import re
 from core.settings import MEDIA_ROOT
 import numpy as np
+import pandas as pd
+from datetime import datetime
 
 
 def get_encodings(request):
@@ -43,19 +45,42 @@ def check_image(request):
                 for chunk in image_file.chunks():
                     f.write(chunk)
 
+            start_time = datetime.now().timestamp()
             face_encoding = getFaceEncoding(uploading_path)
-            if(face_encoding['success']==True):
+            if (face_encoding['success'] == True):
                 threshold = 0.5
-                efes = []
-                existing_face_encodings = ImageData.objects.values('face_encoding')
+                duplicate_faces = []
+                similar_faces = []
+                existing_face_encodings = ImageData.objects.values(
+                    'id', 'face_encoding')
                 for efe in existing_face_encodings:
                     encoding = efe['face_encoding']
-                    efes.append(np.frombuffer(encoding, dtype=np.float64))
+                    existing_encoding = np.frombuffer(
+                        encoding, dtype=np.float64)
+                    match = face_recognition.compare_faces(
+                        [existing_encoding], face_encoding['encoding'], tolerance=threshold)
 
-                match = face_recognition.compare_faces(
-                    efes, face_encoding['encoding'], tolerance=threshold)
-                if any(match):
+                    if match[0]:
+                        duplicate_faces.append({
+                            'id': efe['id'],
+                            'percentage_match': 100.0,
+                        })
+                    else:
+                        similarity = face_recognition.face_distance(
+                            [existing_encoding], face_encoding['encoding'])
+                        similarity_percentage = (1 - similarity[0]) * 100
+
+                        if similarity_percentage > threshold and similarity_percentage >= 50:
+                            similar_faces.append({
+                                'id': efe['id'],
+                                'percentage_match': similarity_percentage,
+                            })
+                end_time = datetime.now().timestamp()
+
+                if len(duplicate_faces) > 0:
                     os.remove(uploading_path)
+                    generate_excel_report(
+                        duplicate_faces, end_time-start_time, face_encoding['anomaly'])
                     return JsonResponse({'status': 'failed', 'msg': 'Duplicate User'})
                 else:
                     save_images_data(uploading_path, 'New')
@@ -77,7 +102,24 @@ def folder_upload(request):
             images = get_images_path(fpath)
 
             if (images['success'] == True):
+                start_time = datetime.now().timestamp()
                 saved = save_images_data(images['image_paths'], root_folder)
+                end_time = datetime.now().timestamp()
+
+                similar_data = prepare_similarity_report(saved['data'])
+
+                report_data = [{
+                    'Total Processing Time(s)': round(end_time-start_time, 1),
+                    'Total Images Found': len(images['image_paths']),
+                    'Total Images Encoded': len(saved['data']),
+                    'Multi-Face Images': saved['anomaly']['multi_face'],
+                    'No-Face Images': saved['anomaly']['no_face']
+                }]
+                generate_report({
+                    'Summary Report': report_data,
+                    'Similarity Report': [similar_data]
+                })
+
                 if (saved['success'] == True):
                     return JsonResponse({'status': 'success', 'msg': 'Data Saved', 'data': images}, safe=False)
                 else:
@@ -109,8 +151,16 @@ def get_images_path(folder_path):
 def save_images_data(images, root_folder):
     try:
         data = []
+        multi_face = 0
+        no_face = 0
         for image in images:
             encoding = getFaceEncoding(image)
+
+            if encoding['anomaly'] == 'multi_face':
+                multi_face += 1
+            elif encoding['anomaly'] == 'no_face':
+                no_face += 1
+
             if (encoding['success'] == True):
                 metadata = getImageMetadata(image, root_folder)
                 data.append(
@@ -123,14 +173,16 @@ def save_images_data(images, root_folder):
                         attributes=metadata['attributes']
                     )
                 )
-        ImageData.objects.bulk_create(data)
-        return {'success': True}
+        saved = ImageData.objects.bulk_create(data)
+        return {'success': True, 'data': saved, 'anomaly': {'multi_face': multi_face, 'no_face': no_face}}
     except Exception as e:
+        print(e)
         return {'success': False}
 
 
 def getFaceEncoding(image):
     try:
+        anomaly = ''
         img = cv2.imread(image)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         detector = dlib.get_frontal_face_detector()
@@ -146,11 +198,16 @@ def getFaceEncoding(image):
 
             detected_encoding = face_recognition.face_encodings(
                 detected_face_image_rgb)[0]
-            return {'success': True, 'encoding': detected_encoding}
-        elif len(faces) > 1:
-            return {'success': False, 'msg': 'More than one face detected.'}
+            return {'success': True, 'encoding': detected_encoding, 'anomaly': None}
         else:
-            return {'success': False, 'msg': 'No face detected.'}
+            if len(faces) > 1:
+                anomaly = 'multi_face'
+                msg = 'More than one face detected.'
+            else:
+                anomaly = 'no-face'
+                msg = 'No face detected'
+            return {'success': False, 'msg': msg, 'anomaly': anomaly}
+
     except Exception as e:
         return {'success': False}
 
@@ -168,10 +225,13 @@ def getImageMetadata(image, root_folder):
             attr_path = image.split(str(root_folder+'\\'))
             att_keys = attr_path[1].split('\\')
             for i in range(0, len(att_keys)-1):
-                metadata['attributes']['attribute'+str(i+1)] = att_keys[i]
+                if i == 0:
+                    metadata['attributes']['attribute1'] = root_folder
+                metadata['attributes']['attribute'+str(i+2)] = att_keys[i]
         return metadata
     except Exception as e:
         return {'success': False}
+
 
 def truncate_image_data(request):
     try:
@@ -179,3 +239,122 @@ def truncate_image_data(request):
         return JsonResponse({'status': 'success', 'msg': 'Table truncated'})
     except Exception as e:
         print(e)
+
+
+def generate_excel_report(image_data, time, anomaly):
+    try:
+        ids = []
+        for img in image_data:
+            ids.append(img['id'])
+        img_data = ImageData.objects.filter(id__in=ids)
+
+        finalData = []
+        for data in img_data:
+            dat = {}
+            dat['id'] = data.id
+            dat['image_file_name'] = data.image_file_name
+            dat['image_height(px)'] = data.image_height
+            dat['image_width(px)'] = data.image_width
+            dat['file_size(bytes)'] = data.file_size
+            finalData.append(dat)
+
+        duplicate = False
+        if (len(finalData) > 0):
+            duplicate = True
+
+        summaryData = [
+            {'Total Image Processing Time(s)': round(time, 1), 'Is Duplicate': duplicate, 'Anomaly': anomaly}]
+        generate_report({
+            'Summary Report': summaryData,
+            'Similarity Report': finalData
+        })
+
+    except Exception as e:
+        print(e)
+        return JsonResponse({'status': 'failed', 'msg': e})
+
+
+def generate_report(dataset):
+    time = str(datetime.now().timestamp())
+    with pd.ExcelWriter('report '+time+'.xlsx', engine='openpyxl') as writer:
+        for sheet_name, data in dataset.items():
+            df = pd.DataFrame(data)
+            if (len(data) == 1):
+                df = df.transpose()
+                df.reset_index(inplace=True)
+                if (sheet_name == 'Summary Report'):
+                    df.columns = ['Title', 'Value']
+                elif (sheet_name == 'Similarity Report'):
+                    df.columns = ['Image Id', 'Similar Id']
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+
+def prepare_similarity_report(datalist):
+    try:
+        similarity = {}
+        for i in range(0, len(datalist)):
+            selected = datalist[i]
+            similar_ids = ''
+            for j in range(0, len(datalist)):
+                if (j != i):
+                    match = compare_faces(
+                        [datalist[j].face_encoding], selected.face_encoding)
+                    if match[0]:
+                        if (similar_ids):
+                            similar_ids += ','
+                        similar_ids += str(datalist[j].id)
+            similarity[selected.id] = similar_ids
+        return similarity
+    except Exception as e:
+        print(e)
+        return {'success': False}
+
+
+def compare_faces(existing_encoding, image_encoding):
+    try:
+        tolerance = 0.5
+        match = face_recognition.compare_faces(
+            existing_encoding, image_encoding, tolerance)
+        return match
+    except Exception as e:
+        print(e)
+        return {'success': False}
+
+
+def cron_job(request):
+    try:
+        if (request.method == 'GET'):
+            datalist = ImageData.objects.values('id', 'face_encoding')
+            start_time = datetime.now().timestamp()
+            similarity = {}
+            for i in range(0, len(datalist)):
+                selected = np.frombuffer(
+                    datalist[i]['face_encoding'], dtype=np.float64)
+                similar_ids = ''
+                for j in range(0, len(datalist)):
+                    if (j != i):
+                        existing_encoding = np.frombuffer(
+                            datalist[j]['face_encoding'], dtype=np.float64)
+                        match = compare_faces(
+                            [existing_encoding], selected)
+                        if match[0]:
+                            if (similar_ids):
+                                similar_ids += ','
+                            similar_ids += str(datalist[j]['id'])
+                similarity[datalist[i]['id']] = similar_ids
+            end_time = datetime.now().timestamp()
+
+            report_data = [{
+                'Total Processing Time(s)': round(end_time-start_time, 1),
+                'Total Images Found': len(datalist),
+                'Multi-Face Images': 0,
+                'No-Face Images': 0
+            }]
+            generate_report({
+                'Summary Report': report_data,
+                'Similarity Report': [similarity]
+            })
+            return JsonResponse({'status': 'success', 'msg': 'Cron job started successfully'}, safe=False)
+    except Exception as e:
+        print(e)
+        return {'success': False}
