@@ -1,5 +1,5 @@
 import os
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import cv2
 import dlib
@@ -11,6 +11,7 @@ from core.settings import MEDIA_ROOT
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from PIL import Image, ImageChops, ImageFilter
 
 
 def get_encodings(request):
@@ -45,6 +46,7 @@ def check_image(request):
                 for chunk in image_file.chunks():
                     f.write(chunk)
 
+            tampered = detect_tampering(uploading_path)
             start_time = datetime.now().timestamp()
             face_encoding = getFaceEncoding(uploading_path)
             if (face_encoding['success'] == True):
@@ -80,14 +82,14 @@ def check_image(request):
                 if len(duplicate_faces) > 0:
                     os.remove(uploading_path)
                     generate_excel_report(
-                        duplicate_faces, end_time-start_time, face_encoding['anomaly'])
+                        duplicate_faces, end_time-start_time, face_encoding['anomaly'], tampered)
                     return JsonResponse({'status': 'failed', 'msg': 'Duplicate User'})
                 else:
                     save_images_data(uploading_path, 'New')
                     os.remove(uploading_path)
                     return JsonResponse({'status': 'success', 'msg': 'Image data saved'})
             else:
-                return JsonResponse({'status': 'failed', 'msg': face_encoding['msg']})
+                return JsonResponse({'status': 'failed', 'msg': 'Unexpected error'})
     except Exception as e:
         return JsonResponse({'status': False, 'detail': e})
 
@@ -104,6 +106,8 @@ def folder_upload(request):
             if (images['success'] == True):
                 start_time = datetime.now().timestamp()
                 saved = save_images_data(images['image_paths'], root_folder)
+                anomalies_report = generate_tampering_report(
+                    images['image_paths'], saved['data'])
                 end_time = datetime.now().timestamp()
 
                 similar_data = prepare_similarity_report(saved['data'])
@@ -117,7 +121,8 @@ def folder_upload(request):
                 }]
                 generate_report({
                     'Summary Report': report_data,
-                    'Similarity Report': [similar_data]
+                    'Similarity Report': [similar_data],
+                    'Anomaly Report': anomalies_report
                 })
 
                 if (saved['success'] == True):
@@ -155,12 +160,10 @@ def save_images_data(images, root_folder):
         no_face = 0
         for image in images:
             encoding = getFaceEncoding(image)
-
             if encoding['anomaly'] == 'multi_face':
                 multi_face += 1
             elif encoding['anomaly'] == 'no_face':
                 no_face += 1
-
             if (encoding['success'] == True):
                 metadata = getImageMetadata(image, root_folder)
                 data.append(
@@ -197,8 +200,11 @@ def getFaceEncoding(image):
                 detected_face_image, cv2.COLOR_BGR2RGB)
 
             detected_encoding = face_recognition.face_encodings(
-                detected_face_image_rgb)[0]
-            return {'success': True, 'encoding': detected_encoding, 'anomaly': None}
+                detected_face_image_rgb)
+            if len(detected_encoding)==1:
+                return {'success': True, 'encoding': detected_encoding[0], 'anomaly': None}
+            else:
+                return {'success': False, 'msg': 'No Face', 'anomaly': 'no-face'}
         else:
             if len(faces) > 1:
                 anomaly = 'multi_face'
@@ -209,6 +215,7 @@ def getFaceEncoding(image):
             return {'success': False, 'msg': msg, 'anomaly': anomaly}
 
     except Exception as e:
+        print('Getting Face Encoding Error:',e)
         return {'success': False}
 
 
@@ -241,7 +248,7 @@ def truncate_image_data(request):
         print(e)
 
 
-def generate_excel_report(image_data, time, anomaly):
+def generate_excel_report(image_data, time, anomaly, tampered):
     try:
         ids = []
         for img in image_data:
@@ -263,7 +270,7 @@ def generate_excel_report(image_data, time, anomaly):
             duplicate = True
 
         summaryData = [
-            {'Total Image Processing Time(s)': round(time, 1), 'Is Duplicate': duplicate, 'Anomaly': anomaly}]
+            {'Total Image Processing Time(s)': round(time, 1), 'Is Duplicate': duplicate, 'Anomaly': anomaly, 'Tampered': tampered}]
         generate_report({
             'Summary Report': summaryData,
             'Similarity Report': finalData
@@ -358,3 +365,30 @@ def cron_job(request):
     except Exception as e:
         print(e)
         return {'success': False}
+
+
+def detect_tampering(image_path, temp_path='temp_ela.jpg', quality=50):
+    try:
+        original = Image.open(image_path)
+        original.save(temp_path, 'JPEG', quality=quality)
+        saved = Image.open(temp_path)
+
+        ela = ImageChops.difference(original, saved)
+        extrema = ela.getextrema()
+        max_diff = max([ex[1] for ex in extrema])
+        os.remove(temp_path)
+        return 'Yes' if max_diff > 50 else 'No'
+    except Exception as e:
+        return f"ELA Error: {e}"
+
+
+def generate_tampering_report(paths, saved):
+    try:
+        tampering_data = []
+        for i in range(0, len(saved)):
+            data = {'id': saved[i].id}
+            data['tampered'] = detect_tampering(paths[i])
+            tampering_data.append(data)
+        return tampering_data
+    except Exception as e:
+        return
