@@ -201,7 +201,7 @@ def getFaceEncoding(image):
 
             detected_encoding = face_recognition.face_encodings(
                 detected_face_image_rgb)
-            if len(detected_encoding)==1:
+            if len(detected_encoding) == 1:
                 return {'success': True, 'encoding': detected_encoding[0], 'anomaly': None}
             else:
                 return {'success': False, 'msg': 'No Face', 'anomaly': 'no-face'}
@@ -215,7 +215,7 @@ def getFaceEncoding(image):
             return {'success': False, 'msg': msg, 'anomaly': anomaly}
 
     except Exception as e:
-        print('Getting Face Encoding Error:',e)
+        print('Getting Face Encoding Error:', e)
         return {'success': False}
 
 
@@ -331,26 +331,52 @@ def compare_faces(existing_encoding, image_encoding):
 def cron_job(request):
     try:
         if (request.method == 'GET'):
-            datalist = ImageData.objects.values('id', 'face_encoding')
+            finalData = []
+            already_matched = []
+            datalist = ImageData.objects.values(
+                'id', 'face_encoding', 'image_file_name', 'image_width', 'image_height', 'file_size', 'attributes')
             start_time = datetime.now().timestamp()
-            similarity = {}
             for i in range(0, len(datalist)):
                 selected = np.frombuffer(
                     datalist[i]['face_encoding'], dtype=np.float64)
-                similar_ids = ''
+                similarity = {}
+                internal_sim = []
                 for j in range(0, len(datalist)):
-                    if (j != i):
+                    if (j != i and datalist[i]['id'] not in already_matched):
+
                         existing_encoding = np.frombuffer(
                             datalist[j]['face_encoding'], dtype=np.float64)
                         match = compare_faces(
                             [existing_encoding], selected)
-                        if match[0]:
-                            if (similar_ids):
-                                similar_ids += ','
-                            similar_ids += str(datalist[j]['id'])
-                similarity[datalist[i]['id']] = similar_ids
-            end_time = datetime.now().timestamp()
 
+                        if match[0]:
+                            isim = {}
+                            already_matched.append(datalist[j]['id'])
+                            isim['Match Id'] = len(finalData)+1
+                            isim['Data Id'] = datalist[j]['id']
+                            isim['Name'] = datalist[j]['image_file_name']
+                            isim['Width'] = datalist[j]['image_width']
+                            isim['Height'] = datalist[j]['image_height']
+                            isim['size'] = datalist[j]['file_size']
+                            for k in range(0, len(datalist[j]['attributes'])):
+                                for key,value in datalist[j]['attributes'].items():
+                                    isim[key] = value
+                            internal_sim.append(isim)
+                if (len(internal_sim) > 0):
+                    similarity['Match Id'] = len(finalData)+1
+                    similarity['Data Id'] = datalist[i]['id']
+                    similarity['Name'] = datalist[i]['image_file_name']
+                    similarity['Width'] = datalist[i]['image_width']
+                    similarity['Height'] = datalist[i]['image_height']
+                    similarity['size'] = datalist[i]['file_size']
+                    for k in range(0, len(datalist[i]['attributes'])):
+                        for key,value in datalist[i]['attributes'].items():
+                            similarity[key] = value
+                    internal_sim.append(similarity)
+                    finalData.extend(internal_sim)
+
+            end_time = datetime.now().timestamp()
+            
             report_data = [{
                 'Total Processing Time(s)': round(end_time-start_time, 1),
                 'Total Images Found': len(datalist),
@@ -359,7 +385,7 @@ def cron_job(request):
             }]
             generate_report({
                 'Summary Report': report_data,
-                'Similarity Report': [similarity]
+                'Similarity Report': finalData
             })
             return JsonResponse({'status': 'success', 'msg': 'Cron job started successfully'}, safe=False)
     except Exception as e:
