@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from PIL import Image, ImageChops, ImageFilter
+from django.utils import timezone
 
 
 def get_encodings(request):
@@ -110,7 +111,7 @@ def folder_upload(request):
                     images['image_paths'], saved['data'])
                 end_time = datetime.now().timestamp()
 
-                similar_data = prepare_similarity_report(saved['data'])
+                # similar_data = prepare_similarity_report(saved['data'])
 
                 report_data = [{
                     'Total Processing Time(s)': round(end_time-start_time, 1),
@@ -121,7 +122,7 @@ def folder_upload(request):
                 }]
                 generate_report({
                     'Summary Report': report_data,
-                    'Similarity Report': [similar_data],
+                    # 'Similarity Report': [similar_data],
                     'Anomaly Report': anomalies_report
                 })
 
@@ -173,9 +174,18 @@ def save_images_data(images, root_folder):
                         image_width=metadata['width'],
                         image_height=metadata['height'],
                         file_size=metadata['size'],
-                        attributes=metadata['attributes']
+                        attributes=metadata['attributes'],
+                        created_at=datetime.fromtimestamp(
+                            metadata['created_at']).replace(tzinfo=timezone.utc),
+                        modified_at=datetime.fromtimestamp(
+                            metadata['modified_at']).replace(tzinfo=timezone.utc)
                     )
                 )
+        # existing_combinations = ImageData.objects.values_list('image_file_name','modified_at')
+
+        # filtered_data_to_insert = [
+        #     row for row in data if (row.image_file_name, row.image_file_name, row.modified_at) not in existing_combinations
+        # ]
         saved = ImageData.objects.bulk_create(data)
         return {'success': True, 'data': saved, 'anomaly': {'multi_face': multi_face, 'no_face': no_face}}
     except Exception as e:
@@ -227,6 +237,8 @@ def getImageMetadata(image, root_folder):
             metadata['width'] = img.width
             metadata['height'] = img.height
             metadata['size'] = os.path.getsize(image)
+            metadata['created_at'] = os.path.getctime(image)
+            metadata['modified_at'] = os.path.getmtime(image)
             metadata['attributes'] = {}
 
             attr_path = image.split(str(root_folder+'\\'))
@@ -263,6 +275,12 @@ def generate_excel_report(image_data, time, anomaly, tampered):
             dat['image_height(px)'] = data.image_height
             dat['image_width(px)'] = data.image_width
             dat['file_size(bytes)'] = data.file_size
+            dat['created_at'] = data.created_at.strftime(
+                '%Y-%m-%d %H:%M:%S %Z')
+            dat['modified_at'] = data.modified_at.strftime(
+                '%Y-%m-%d %H:%M:%S %Z')
+            for key, value in data.attributes.items():
+                dat[key] = value
             finalData.append(dat)
 
         duplicate = False
@@ -334,7 +352,7 @@ def cron_job(request):
             finalData = []
             already_matched = []
             datalist = ImageData.objects.values(
-                'id', 'face_encoding', 'image_file_name', 'image_width', 'image_height', 'file_size', 'attributes')
+                'id', 'face_encoding', 'image_file_name', 'image_width', 'image_height', 'file_size', 'attributes', 'created_at', 'modified_at')
             start_time = datetime.now().timestamp()
             for i in range(0, len(datalist)):
                 selected = np.frombuffer(
@@ -358,8 +376,12 @@ def cron_job(request):
                             isim['Width'] = datalist[j]['image_width']
                             isim['Height'] = datalist[j]['image_height']
                             isim['size'] = datalist[j]['file_size']
+                            isim['created_at'] = datalist[j]['created_at'].strftime(
+                                '%Y-%m-%d %H:%M:%S %Z')
+                            isim['modified_at'] = datalist[j]['modified_at'].strftime(
+                                '%Y-%m-%d %H:%M:%S %Z')
                             for k in range(0, len(datalist[j]['attributes'])):
-                                for key,value in datalist[j]['attributes'].items():
+                                for key, value in datalist[j]['attributes'].items():
                                     isim[key] = value
                             internal_sim.append(isim)
                 if (len(internal_sim) > 0):
@@ -369,14 +391,18 @@ def cron_job(request):
                     similarity['Width'] = datalist[i]['image_width']
                     similarity['Height'] = datalist[i]['image_height']
                     similarity['size'] = datalist[i]['file_size']
+                    similarity['created_at'] = datalist[i]['created_at'].strftime(
+                        '%Y-%m-%d %H:%M:%S %Z')
+                    similarity['modified_at'] = datalist[i]['modified_at'].strftime(
+                        '%Y-%m-%d %H:%M:%S %Z')
                     for k in range(0, len(datalist[i]['attributes'])):
-                        for key,value in datalist[i]['attributes'].items():
+                        for key, value in datalist[i]['attributes'].items():
                             similarity[key] = value
                     internal_sim.append(similarity)
                     finalData.extend(internal_sim)
 
             end_time = datetime.now().timestamp()
-            
+
             report_data = [{
                 'Total Processing Time(s)': round(end_time-start_time, 1),
                 'Total Images Found': len(datalist),
