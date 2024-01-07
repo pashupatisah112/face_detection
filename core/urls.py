@@ -20,6 +20,7 @@ from . import views
 
 urlpatterns = [
     path('', views.home),
+    path('folder', views.folder),
     path('encoding/', include('encoding.urls')),
     path('admin/', admin.site.urls),
     path('detect/', include('detect.urls'))

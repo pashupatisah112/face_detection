@@ -1,3 +1,7 @@
 from django.shortcuts import render
 
-#Code goes here
+def home(request):
+    return render(request, 'form.html')
+
+def folder(request):
+    return render(request, 'upload_folder.html')

@@ -4,6 +4,7 @@ from .models import ImageData
 from utils.views import compare_faces
 from django.http import JsonResponse
 from report.views import generate_report
+from utils.helpers import success_response,failed_response
 
 
 def get_encodings(request):
@@ -21,16 +22,17 @@ def get_encodings(request):
                 'file_size': enc.file_size,
                 'attributes': enc.attributes
             })
-        return JsonResponse({'status': 'success', 'msg': 'Data fetched', 'data': list}, safe=False)
+        return success_response(list,'Data Fetched')
     except Exception as e:
-        return JsonResponse({'success': False, 'msg': 'Error fetching data', 'detail': e}, safe=False)
+        return failed_response()
 
 def truncate_image_data(request):
     try:
         ImageData.objects.all().delete()
-        return JsonResponse({'status': 'success', 'msg': 'Table truncated'})
+        return success_response('Table Truncated')
     except Exception as e:
         print(e)
+        return failed_response()
 
 def cron_job(request):
     try:

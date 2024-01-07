@@ -25,6 +25,7 @@ def get_images_path(folder_path):
     except Exception as e:
         return {'success': False}
 
+
 def save_images_data(images, root_folder):
     try:
         data = []
@@ -63,7 +64,8 @@ def save_images_data(images, root_folder):
     except Exception as e:
         print(e)
         return {'success': False}
-    
+
+
 def getFaceEncoding(image):
     try:
         anomaly = ''
@@ -98,7 +100,8 @@ def getFaceEncoding(image):
     except Exception as e:
         print('Getting Face Encoding Error:', e)
         return {'success': False}
-    
+
+
 def getImageMetadata(image, root_folder):
     try:
         metadata = {}
@@ -111,36 +114,51 @@ def getImageMetadata(image, root_folder):
             metadata['modified_at'] = os.path.getmtime(image)
             metadata['attributes'] = {}
 
-            attr_path = image.split(str(root_folder+'\\'))
-            att_keys = attr_path[1].split('\\')
-            for i in range(0, len(att_keys)-1):
-                if i == 0:
-                    metadata['attributes']['attribute1'] = root_folder
-                metadata['attributes']['attribute'+str(i+2)] = att_keys[i]
+            if(root_folder):
+                attr_path = image.split(str(root_folder+'\\'))
+                att_keys = attr_path[1].split('\\')
+                for i in range(0, len(att_keys)-1):
+                    if i == 0:
+                        metadata['attributes']['attribute1'] = root_folder
+                    metadata['attributes']['attribute'+str(i+2)] = att_keys[i]
         return metadata
     except Exception as e:
+        print(e)
         return {'success': False}
-    
-def detect_tampering(image_path, temp_path='temp_ela.jpg', quality=50):
+
+
+def detect_tampering(image_path, temp_path='temp_ela.jpg', quality=80):
     try:
         original = Image.open(image_path)
         original.save(temp_path, 'JPEG', quality=quality)
         saved = Image.open(temp_path)
-
         ela = ImageChops.difference(original, saved)
         extrema = ela.getextrema()
         max_diff = max([ex[1] for ex in extrema])
         os.remove(temp_path)
-        return 'Yes' if max_diff > 50 else 'No'
+        return {'success': True, 'data': 'Yes' if max_diff > 50 else 'No', 'msg': 'Ok'}
     except Exception as e:
-        return f"ELA Error: {e}"
+        return {'success': False, 'msg': 'Error in tampering detection'}
 
-def compare_faces(existing_encoding, image_encoding):
+
+def compare_faces(existing_encoding, image_encoding, tolerance=0.5):
     try:
-        tolerance = 0.5
         match = face_recognition.compare_faces(
             existing_encoding, image_encoding, tolerance)
-        return match
+
+        match_result = {'status': False, 'percentage_match': 100}
+
+        if match[0]:
+            match_result['status'] = True
+        else:
+            similarity = face_recognition.face_distance(
+                [existing_encoding], image_encoding)
+
+            similarity_percentage = (1 - similarity[0]) * 100
+
+            match_result['percentage_match'] = similarity_percentage
+
+        return match_result
     except Exception as e:
         print(e)
         return {'success': False}
